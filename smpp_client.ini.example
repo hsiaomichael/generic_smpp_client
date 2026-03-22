@@ -1,0 +1,62 @@
+# smpp_client.ini
+# Configuration file for generic_smpp_client.py
+# Encoding: UTF-8
+#
+# This file is loaded at startup.  Any changes made via the in-app
+# config menu (option 5) are saved back here automatically.
+#
+# To use a different environment, keep one ini file per environment:
+#   smpp_client.ini          <- current / active
+#   smpp_client.uat.ini      <- copy and rename to switch
+#   smpp_client.prod.ini
+# ------------------------------------------------------------------
+
+[smsc]
+# SMSC host and port
+server      = 192.168.yy.xx
+port        = 9000
+
+
+src_addr='1.1.61918079200'
+dst_addr='1.1.61918079300'
+# SMPP credentials (system_id max 16 chars, password max 9 chars)
+system_id   = YYYYY
+password    = xxxx
+system_type =
+
+# SMPP version: 52 = 0x34 = SMPP 3.4  (do not change unless required)
+smpp_version = 52
+
+
+[message]
+# Source address sent in submit_sm (TON=1 International, NPI=1 ISDN)
+source_addr  = 61918079200
+
+# Default destination address shown as prompt default
+default_dest = 61918079300
+
+# Request delivery receipt from SMSC: true / false
+# true  -> registered_delivery = 0x01  (SMSC sends DR back)
+# false -> registered_delivery = 0x00  (no DR expected; DR tracking skipped)
+request_dr   = true
+
+# Default message texts (used as prompt defaults)
+default_short_text      = a2p send from smpp client
+
+default_long_text       = SEG1 This is segment 1 of the GSM/SMPP long message. It continues the structured transmission, ensuring clarity and coherence throughout. Segment 1 proviSEG2 This is segment 2 of the GSM/SMPP long message. It continues the structured transmission, ensuring clarity and coherence throughout. Segment 2 proviSEG3 This is segment 3 of the GSM/SMPP long message. It continues the structured transmission, ensuring clarity and coherence throughout. Segment 3 provi
+
+# Unicode (UCS2) default texts -- UTF-8 encoded
+default_ucs2_short_text = A2P 簡訊服務 SMS；有時也稱為訊息、簡訊、文字訊息
+
+default_ucs2_long_text  = 當一則簡訊（SMS）超過標準長度限制時（例如 GSM 7-bit 編碼的 160 字元或 UCS-2 編碼的 70 字元），GSM 系統會使用（Concatenated SMS） 技術來分割並傳送訊息。每一部分都會附加一段特殊的資料，稱為（UDH） UDH 是一段佔用空間的控制資訊，通常佔用 6 或 7 個位元組（bytes）。因此每一部分可用的字元數會比單一 SMS 少： GSM 7-bit 編碼：每段最多 153 字元 UCS-2 編碼：每段最多 67 字元
+
+
+[timing]
+# Seconds between enquire_link keep-alive pings
+el_interval       = 30
+
+# Seconds between periodic DR audit scans (warns about missing DRs)
+dr_check_interval = 60
+
+# Seconds to wait for submit_sm_resp before declaring timeout
+resp_timeout      = 10
