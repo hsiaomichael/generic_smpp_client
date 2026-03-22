@@ -17,19 +17,20 @@ import sys
 # Default configuration values (overridden by smpp_client.ini if present)
 # ---------------------------------------------------------------------------
 _CFG_DEFAULTS = {
-    'server':             '127.0.0.1',
-    'port':               '9000',
-    'system_id':          'SMPP_TEST',
-    'password':           'pooky',
+    # Connection -- replace with values from smpp_client.ini
+    'server':             'localhost',
+    'port':               '2775',
+    'system_id':          'YOUR_SYSTEM_ID',
+    'password':           'YOUR_PASS',
     'system_type':        '',
-    'source_addr':        '817083005049',
-    'smpp_version':       '52',          # 0x34 = 52 decimal
+    'source_addr':        'YOUR_SOURCE',
+    'smpp_version':       '52',          # 0x34 = SMPP 3.4
     'el_interval':        '30',
     'dr_check_interval':  '60',
     'resp_timeout':       '10',
-    'default_dest':       '817085852199',
+    'default_dest':       'DESTINATION',
     'request_dr':         'true',
-    'default_short_text': 'a2p send from smpp client',
+    'default_short_text': 'Test message from generic_smpp_client',
     'default_long_text': (
         'SEG1 This is segment 1 of the GSM/SMPP long message. It continues '
         'the structured transmission, ensuring clarity and coherence '
