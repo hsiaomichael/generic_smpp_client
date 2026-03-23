@@ -323,6 +323,4 @@ smpp-client/
 
 ---
 
-## License
 
-MIT
