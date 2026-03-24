@@ -37,7 +37,7 @@ cp smpp_client.ini.example smpp_client.ini
 #    (smpp_client.ini is in .gitignore and will NOT be committed)
 
 # 4. Run
-python smpp_client.py
+python generic_smpp_client.py
 ```
 
 ---
@@ -81,7 +81,7 @@ resp_timeout      = 10    # submit_sm_resp wait timeout (seconds)
 cp smpp_client.ini.example smpp_client.uat.ini   # fill with UAT values
 cp smpp_client.ini.example smpp_client.prod.ini  # fill with prod values
 cp smpp_client.uat.ini smpp_client.ini            # activate UAT
-python smpp_client.py
+python generic_smpp_client.py
 ```
 
 Startup confirms which file is active:
@@ -305,7 +305,7 @@ smpp_client.ini
 
 ```
 smpp-client/
-├── smpp_client.py           # main script
+├── generic_smpp_client.py           # main script
 ├── smpp_client.ini.example  # safe template (commit this)
 ├── smpp_client.ini          # your real config (in .gitignore)
 ├── README.md
