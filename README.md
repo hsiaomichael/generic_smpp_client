@@ -10,7 +10,7 @@ load testing up to 100K messages, and full PDU hex logging.
 
 | Item | Name |
 |------|------|
-| **Script** | `smpp_client.py` |
+| **Script** | `generic_smpp_client.py` |
 | **Repository** | `smpp-client` |
 | **Config file** | `smpp_client.ini` |
 
