@@ -313,6 +313,35 @@ def _stat(key, n=1):
     with _submit_stats_lock:
         _submit_stats[key] += n
 
+# SMPP PDU operation counters (all directions)
+_pdu_counters = {
+    # Outbound (TX)
+    'tx_bind':           0,
+    'tx_submit_sm':      0,
+    'tx_deliver_sm_resp':0,
+    'tx_enquire_link':   0,
+    'tx_enquire_link_resp': 0,
+    'tx_unbind':         0,
+    # Inbound (RX)
+    'rx_bind_resp':      0,
+    'rx_submit_sm_resp': 0,
+    'rx_deliver_sm':     0,   # total deliver_sm (MO + DR)
+    'rx_deliver_sm_dr':  0,   # DR subset
+    'rx_deliver_sm_mo':  0,   # MO subset
+    'rx_enquire_link':   0,
+    'rx_enquire_link_resp': 0,
+    'rx_unbind':         0,
+    'rx_unbind_resp':    0,
+    'rx_unknown':        0,
+}
+_pdu_counters_lock = threading.Lock()
+
+def _pdu_count(key, n=1):
+    """Increment a PDU operation counter thread-safely."""
+    with _pdu_counters_lock:
+        if key in _pdu_counters:
+            _pdu_counters[key] += n
+
 # Thread-safe sequence counter
 _seq_lock        = threading.Lock()
 _sequence_number = 1
@@ -618,7 +647,9 @@ def bind_transceiver(sock):
             b'\x00')                   # address_range
     cmd_len = 16 + len(body)
     send_pdu(sock, struct.pack('>IIII', cmd_len, BIND_TRANSCEIVER, 0, seq) + body)
+    _pdu_count('tx_bind')
     pdu = read_pdu(sock)
+    _pdu_count('rx_bind_resp')
     command_id, command_status, _, system_id = decode_bind_transceiver_resp(pdu)
     if command_id == BIND_TRANSCEIVER_RESP and command_status == ESME_ROK:
         log("info", f"[BIND] Transceiver bound OK: system_id={system_id!r}")
@@ -820,6 +851,7 @@ def submit_sm(sock, dest_addr, message_text, data_coding=DATA_CODING_LATIN1,
     log('debug', f"[SUBMIT] detail: dc=0x{data_coding:02X} "        f"chars={char_count} payload_bytes={len(message_bytes)} request_dr={dr}")
     send_pdu(sock, pdu)
     _stat('sent')
+    _pdu_count('tx_submit_sm')
 
     try:
         resp = _wait_submit_resp(seq)
@@ -947,6 +979,7 @@ def send_unbind(sock):
     try:
         seq = next_sequence()
         send_pdu(sock, struct.pack('>IIII', 16, UNBIND, 0, seq))
+        _pdu_count('tx_unbind')
         log('info', f"[UNBIND] Sent unbind (seq={seq}) - closing session")
     except Exception as e:
         log('debug', f"[UNBIND] Error sending unbind: {e}")
@@ -955,16 +988,19 @@ def send_unbind(sock):
 def send_enquire_link(sock):
     seq = next_sequence()
     send_pdu(sock, struct.pack('>IIII', 16, ENQUIRE_LINK, 0, seq))
+    _pdu_count('tx_enquire_link')
     return seq
 
 
 def send_enquire_link_resp(sock, seq):
     send_pdu(sock, struct.pack('>IIII', 16, ENQUIRE_LINK_RESP, ESME_ROK, seq))
+    _pdu_count('tx_enquire_link_resp')
 
 
 def send_deliver_sm_resp(sock, seq):
     # body = null byte (empty message_id field)
     send_pdu(sock, struct.pack('>IIIIB', 17, DELIVER_SM_RESP, ESME_ROK, seq, 0))
+    _pdu_count('tx_deliver_sm_resp')
 
 # ---------------------------------------------------------------------------
 # Background threads
@@ -1021,10 +1057,12 @@ def pdu_receiver_worker(sock, stop_event):
 
         # --- submit_sm_resp: route to queue, never handle here directly ---
         if command_id == SUBMIT_SM_RESP:
+            _pdu_count('rx_submit_sm_resp')
             _submit_resp_queue.put(pdu)
 
         # --- deliver_sm: DR or MO ---
         elif command_id == DELIVER_SM:
+            _pdu_count('rx_deliver_sm')
             try:
                 (_, _, seq, esm_class,
                  src, dst, data_coding, short_msg) = decode_deliver_sm(pdu)
@@ -1037,11 +1075,10 @@ def pdu_receiver_worker(sock, stop_event):
                 continue
 
             if esm_class & ESM_CLASS_DELIVERY_RECEIPT:
-                # Pass raw bytes; process_delivery_receipt decodes text:
-                # field using the stored original data_coding
+                _pdu_count('rx_deliver_sm_dr')
                 process_delivery_receipt(seq, short_msg, data_coding)
             else:
-                # MO: decode using the deliver_sm's own data_coding
+                _pdu_count('rx_deliver_sm_mo')
                 mo_text = _decode_sm_bytes(short_msg, data_coding)
                 log("info", f"[MO] From={src} To={dst} "
                       f"dc=0x{data_coding:02X} msg={mo_text!r}")
@@ -1054,17 +1091,37 @@ def pdu_receiver_worker(sock, stop_event):
 
         # --- enquire_link from SMSC: reply immediately ---
         elif command_id == ENQUIRE_LINK:
+            _pdu_count('rx_enquire_link')
             try:
                 send_enquire_link_resp(sock, seq)
-                log("debug", f"[EL] enquire_link from SMSC (seq={seq}) -> replied")
+                log("info", f"[EL] enquire_link from SMSC (seq={seq}) -> replied")
             except Exception as e:
                 log("error", f"[EL] Failed to send enquire_link_resp: {e}")
 
-        # --- enquire_link_resp: just log ---
+        # --- enquire_link_resp: log at INFO so it shows on console ---
         elif command_id == ENQUIRE_LINK_RESP:
-            log("debug", f"[EL] enquire_link_resp received (seq={seq})")
+            _pdu_count('rx_enquire_link_resp')
+            log("info", f"[EL] enquire_link_resp received (seq={seq})")
+
+        # --- unbind from SMSC: reply and shut down cleanly ---
+        elif command_id == UNBIND:
+            _pdu_count('rx_unbind')
+            log("info", f"[UNBIND] SMSC sent unbind (seq={seq}) - sending unbind_resp and stopping")
+            try:
+                send_pdu(sock, struct.pack('>IIII', 16, UNBIND_RESP, ESME_ROK, seq))
+                _pdu_count('tx_unbind')
+            except Exception as e:
+                log("error", f"[UNBIND] Failed to send unbind_resp: {e}")
+            stop_event.set()
+            break
+
+        # --- unbind_resp: SMSC acknowledged our unbind ---
+        elif command_id == UNBIND_RESP:
+            _pdu_count('rx_unbind_resp')
+            log("info", f"[UNBIND] unbind_resp received (seq={seq}) - session closed cleanly")
 
         else:
+            _pdu_count('rx_unknown')
             log("warning", f"[RX] Unhandled PDU: "
                   f"cmd=0x{command_id:08X} seq={seq} "
                   f"status=0x{command_status:08X}")
@@ -1336,7 +1393,7 @@ def menu_submit_long_sm(sock):
 def menu_send_enquire_link(sock):
     print("\n-- Manual Enquire Link --")
     seq = send_enquire_link(sock)
-    print(f"[EL] enquire_link sent (seq={seq})")
+    log("info", f"[EL] enquire_link sent (seq={seq}) - watch log for enquire_link_resp")
 
 
 def _print_dr_table(rows, now, page, total_pages, page_size):
@@ -1594,6 +1651,37 @@ def menu_show_config():
             print("[WARN] Unknown option.")
 
 
+def menu_show_counters():
+    print("\n-- SMPP Session Counters --")
+    with _pdu_counters_lock:
+        c = dict(_pdu_counters)
+    with _submit_stats_lock:
+        s = dict(_submit_stats)
+
+    print("  Outbound (TX)")
+    print(f"    bind_transceiver     : {c['tx_bind']:,}")
+    print(f"    submit_sm            : {c['tx_submit_sm']:,}")
+    print(f"    deliver_sm_resp      : {c['tx_deliver_sm_resp']:,}")
+    print(f"    enquire_link         : {c['tx_enquire_link']:,}")
+    print(f"    enquire_link_resp    : {c['tx_enquire_link_resp']:,}")
+    print(f"    unbind               : {c['tx_unbind']:,}")
+    print()
+    print("  Inbound (RX)")
+    print(f"    bind_transceiver_resp: {c['rx_bind_resp']:,}")
+    print(f"    submit_sm_resp       : {c['rx_submit_sm_resp']:,}")
+    print(f"      -> OK (ESME_ROK)   : {s['ok']:,}")
+    print(f"      -> FAILED          : {s['failed']:,}")
+    print(f"      -> timeout         : {s['timeout']:,}")
+    print(f"    deliver_sm (total)   : {c['rx_deliver_sm']:,}")
+    print(f"      -> DR              : {c['rx_deliver_sm_dr']:,}")
+    print(f"      -> MO              : {c['rx_deliver_sm_mo']:,}")
+    print(f"    enquire_link         : {c['rx_enquire_link']:,}")
+    print(f"    enquire_link_resp    : {c['rx_enquire_link_resp']:,}")
+    print(f"    unbind               : {c['rx_unbind']:,}")
+    print(f"    unbind_resp          : {c['rx_unbind_resp']:,}")
+    print(f"    unknown/unhandled    : {c['rx_unknown']:,}")
+
+
 def print_menu():
     print("\n" + "="*50)
     print("  Generic SMPP Client - Main Menu")
@@ -1601,8 +1689,9 @@ def print_menu():
     print("  1  Submit short message")
     print("  2  Submit long message (multipart)")
     print("  3  Send enquire_link manually")
-    print("  4  Show pending DR status")
+    print("  4  Show submit & DR status")
     print("  5  Show configuration")
+    print("  6  Show SMPP session counters")
     print("  0  Quit")
     print("="*50)
 
@@ -1677,11 +1766,13 @@ def main():
                 menu_show_pending_dr()
             elif choice == '5':
                 menu_show_config()
+            elif choice == '6':
+                menu_show_counters()
             elif choice == '0':
                 log("info", "Goodbye.")
                 break
             else:
-                print("[WARN] Unknown choice - please enter 0-5.")
+                print("[WARN] Unknown choice - please enter 0-6.")
 
     finally:
         stop_event.set()
